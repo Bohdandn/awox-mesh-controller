@@ -12,6 +12,8 @@ This is a personal home project intended to bridge older lights with Home
 Assistant. Contributions are not expected, but you are welcome to fork the
 project and adapt it for your own setup.
 
+![AwoX Mesh Controller](img/home.png)
+
 ## Features
 
 - Save and control multiple lights.
@@ -145,4 +147,4 @@ Support directory.
 
 ## License
 
-Licensed under the [MIT License](LICENSE.md).
+Licensed under the [MIT License](LICENSE).
