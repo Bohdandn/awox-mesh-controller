@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package release
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Set release version
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          version="${RELEASE_TAG#v}"
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "Release tag $RELEASE_TAG must contain a numeric version such as v1.0.0" >&2
+            exit 1
+          fi
+
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" Info.plist
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build release package
+        id: package
+        run: |
+          set -euo pipefail
+
+          archive=$(./package-release.sh)
+          checksum="${archive%/*}/sha256sums.txt"
+          digest=$(shasum -a 256 "$archive" | awk '{print $1}')
+          printf '%s  %s\n' "$digest" "$(basename "$archive")" > "$checksum"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+          echo "sha256=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$VERSION" \
+            --generate-notes \
+            --verify-tag \
+            --draft
+
+      - name: Upload package and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+        run: >-
+          gh release upload "$RELEASE_TAG" "$ARCHIVE" "$CHECKSUM"
+          --repo "$GITHUB_REPOSITORY"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+
+      - name: Summarize release digest
+        env:
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          {
+            echo "### Release package"
+            echo
+            printf -- '- File: `%s`\n' "$(basename "$ARCHIVE")"
+            printf -- '- SHA-256: `%s`\n' "$SHA256"
+          } >> "$GITHUB_STEP_SUMMARY"

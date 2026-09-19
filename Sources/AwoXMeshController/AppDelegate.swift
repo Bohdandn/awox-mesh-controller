@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
     private var addPasswordField: NSSecureTextField?
     private var addStatusLabel: NSTextField?
     private var addSaveButton: NSButton?
+    private var aboutWindow: NSWindow?
     private var logsWindow: NSWindow?
     private var logsTextView: NSTextView?
     private var settingsWindow: NSWindow?
@@ -138,7 +139,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
         let appItem = NSMenuItem()
         menu.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About AwoX Mesh Controller", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let aboutItem = appMenu.addItem(withTitle: "About AwoX Mesh Controller", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
         appMenu.addItem(.separator())
         let settingsItem = appMenu.addItem(withTitle: "Settings...", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.target = self
@@ -157,6 +159,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
         refreshItem.target = self
         deviceItem.submenu = deviceMenu
         NSApp.mainMenu = menu
+    }
+
+    @objc private func showAbout() {
+        if aboutWindow == nil { buildAboutWindow() }
+        NSApp.activate(ignoringOtherApps: true)
+        aboutWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func buildAboutWindow() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 300),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "About AwoX Mesh Controller"
+        window.isReleasedWhenClosed = false
+
+        let icon = NSImageView(image: NSImage(named: NSImage.applicationIconName) ?? NSImage())
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSTextField(labelWithString: "AwoX Mesh Controller")
+        title.font = .systemFont(ofSize: 20, weight: .semibold)
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        let versionLabel = NSTextField(labelWithString: "Version \(version)")
+        let commitHash = Bundle.main.object(forInfoDictionaryKey: "BuildCommitHash") as? String ?? "Unknown"
+        let commitLabel = NSTextField(labelWithString: "Commit \(commitHash)")
+        let buildDate = Bundle.main.object(forInfoDictionaryKey: "BuildDate") as? String ?? "Unknown"
+        let buildDateLabel = NSTextField(labelWithString: "Built \(buildDate)")
+        for label in [versionLabel, commitLabel, buildDateLabel] {
+            label.textColor = .secondaryLabelColor
+        }
+
+        let repository = linkButton(title: "GitHub Repository", action: #selector(openRepository))
+        let license = linkButton(title: "MIT License", action: #selector(openLicense))
+        let links = NSStackView(views: [repository, license])
+        links.orientation = .vertical
+        links.alignment = .centerX
+        links.spacing = 4
+
+        let stack = NSStackView(views: [icon, title, versionLabel, commitLabel, buildDateLabel, links])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        window.contentView?.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: window.contentView!.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: window.contentView!.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 96),
+            icon.heightAnchor.constraint(equalTo: icon.widthAnchor),
+        ])
+        aboutWindow = window
+        window.center()
+    }
+
+    private func linkButton(title: String, action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: self, action: action)
+        button.isBordered = false
+        button.contentTintColor = .linkColor
+        return button
+    }
+
+    @objc private func openRepository() {
+        openExternalURL("https://github.com/Bohdandn/awox-mesh-controller")
+    }
+
+    @objc private func openLicense() {
+        openExternalURL("https://github.com/Bohdandn/awox-mesh-controller/blob/main/LICENSE")
+    }
+
+    private func openExternalURL(_ string: String) {
+        guard let url = URL(string: string) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func buildStatusItem() {

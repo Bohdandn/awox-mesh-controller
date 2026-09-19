@@ -9,10 +9,16 @@ macos_dir="$contents_dir/MacOS"
 resources_dir="$contents_dir/Resources"
 temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/awox-mesh-controller.XXXXXX")
 iconset_dir="$temporary_dir/AppIcon.iconset"
+metadata_plist="$temporary_dir/Info.plist"
 trap 'rm -rf "$temporary_dir"' EXIT
 
 rm -rf "$build_dir"
 mkdir -p "$macos_dir" "$resources_dir" "$iconset_dir"
+cp "$root_dir/Info.plist" "$metadata_plist"
+commit_hash=$(git -C "$root_dir" rev-parse HEAD | cut -c1-8)
+build_date=$(date -u '+%Y-%m-%d %H:%M UTC')
+/usr/libexec/PlistBuddy -c "Add :BuildCommitHash string $commit_hash" "$metadata_plist"
+/usr/libexec/PlistBuddy -c "Add :BuildDate string '$build_date'" "$metadata_plist"
 
 sips -s format png "$root_dir/Assets/AppIcon.svg" --out "$temporary_dir/AppIcon-1024.png" >/dev/null
 for size in 16 32 128 256 512; do
@@ -38,7 +44,7 @@ xcrun swiftc \
     "$temporary_dir/CryptoBridge.o" \
     -o "$macos_dir/AwoXMeshController"
 
-cp "$root_dir/Info.plist" "$contents_dir/Info.plist"
+cp "$metadata_plist" "$contents_dir/Info.plist"
 codesign --force --sign - --identifier com.github.bohdandn.awox-mesh-controller "$app_dir"
 
 echo "$app_dir"

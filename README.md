@@ -13,6 +13,7 @@ Assistant. Contributions are not expected, but you are welcome to fork the
 project and adapt it for your own setup.
 
 ![AwoX Mesh Controller](img/home.png)
+![AwoX Mesh Controller Integrations](img/integrations.png)
 
 ## Features
 
@@ -58,15 +59,18 @@ Launch the result with:
 open "build/AwoX Mesh Controller.app"
 ```
 
-To create a GitHub Release asset, run:
+To create the release archive locally, run:
 
 ```sh
 ./package-release.sh
 ```
 
-Upload the single ZIP from `dist/`. Its only top-level item is the application
-bundle; the ZIP is necessary because a macOS `.app` is a directory rather than
-a single uploadable file.
+Push a tag such as `v1.0.0` to start the `Release` GitHub Actions workflow. It
+creates a `1.0.0` release with generated notes, derives `1.0.0` from the tag,
+writes it into the packaged app's `Info.plist`, and uploads both the archive and
+`sha256sums.txt`. Existing release assets are never overwritten by the
+workflow. The archive's only top-level item is the application bundle because
+a macOS `.app` is a directory rather than a single uploadable file.
 
 ## Add A Light
 
