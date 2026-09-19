@@ -40,6 +40,8 @@ jobs:
 
       - name: Build Swift application
         if: matrix.build-mode == 'manual'
+        env:
+          SWIFT_USE_INTEGRATED_DRIVER: "NO"
         run: zsh -x ./build.sh
 
       - name: Perform CodeQL Analysis

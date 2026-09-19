@@ -33,7 +33,13 @@ xcrun clang \
     -c "$root_dir/Sources/AwoXMeshController/CryptoBridge.c" \
     -o "$temporary_dir/CryptoBridge.o"
 
+swiftc_driver_flags=()
+if [[ "${SWIFT_USE_INTEGRATED_DRIVER:-YES}" == "NO" ]]; then
+    swiftc_driver_flags=(-disallow-use-new-driver)
+fi
+
 xcrun swiftc \
+    "${swiftc_driver_flags[@]}" \
     -swift-version 5 \
     -O \
     -framework AppKit \
