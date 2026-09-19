@@ -46,12 +46,7 @@ jobs:
           set -euo pipefail
 
           archive=$(./package-release.sh)
-          checksum="${archive%/*}/sha256sums.txt"
-          digest=$(shasum -a 256 "$archive" | awk '{print $1}')
-          printf '%s  %s\n' "$digest" "$(basename "$archive")" > "$checksum"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
-          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
-          echo "sha256=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Create draft release
         env:
@@ -68,14 +63,13 @@ jobs:
             --verify-tag \
             --draft
 
-      - name: Upload package and checksums
+      - name: Upload package
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
           ARCHIVE: ${{ steps.package.outputs.archive }}
-          CHECKSUM: ${{ steps.package.outputs.checksum }}
         run: >-
-          gh release upload "$RELEASE_TAG" "$ARCHIVE" "$CHECKSUM"
+          gh release upload "$RELEASE_TAG" "$ARCHIVE"
           --repo "$GITHUB_REPOSITORY"
 
       - name: Publish release
@@ -84,14 +78,12 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
-      - name: Summarize release digest
+      - name: Summarize release package
         env:
           ARCHIVE: ${{ steps.package.outputs.archive }}
-          SHA256: ${{ steps.package.outputs.sha256 }}
         run: |
           {
             echo "### Release package"
             echo
             printf -- '- File: `%s`\n' "$(basename "$ARCHIVE")"
-            printf -- '- SHA-256: `%s`\n' "$SHA256"
           } >> "$GITHUB_STEP_SUMMARY"

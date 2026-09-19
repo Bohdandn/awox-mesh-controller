@@ -67,10 +67,28 @@ To create the release archive locally, run:
 
 Push a tag such as `v1.0.0` to start the `Release` GitHub Actions workflow. It
 creates a `1.0.0` release with generated notes, derives `1.0.0` from the tag,
-writes it into the packaged app's `Info.plist`, and uploads both the archive and
-`sha256sums.txt`. Existing release assets are never overwritten by the
-workflow. The archive's only top-level item is the application bundle because
-a macOS `.app` is a directory rather than a single uploadable file.
+writes it into the packaged app's `Info.plist`, and uploads the archive. GitHub
+displays the archive's SHA-256 directly on the release page. Existing release
+assets are never overwritten by the workflow. The archive's only top-level
+item is the application bundle because a macOS `.app` is a directory rather
+than a single uploadable file.
+
+### Run A Downloaded Release
+
+Releases are intentionally ad-hoc-signed, so macOS cannot verify them as
+notarized software on another Mac. After extracting the ZIP, Control-click
+`AwoX Mesh Controller.app`, choose **Open**, and confirm **Open** in the dialog.
+This approval is normally needed only on the first launch. As a targeted
+command-line alternative, remove the quarantine flag from the app you
+downloaded and then open it:
+
+```sh
+xattr -dr com.apple.quarantine "/path/to/AwoX Mesh Controller.app"
+open "/path/to/AwoX Mesh Controller.app"
+```
+
+Only use the bypass for an archive downloaded from the intended repository and
+verify its release asset hash on GitHub first.
 
 ## Add A Light
 

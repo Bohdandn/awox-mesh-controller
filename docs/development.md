@@ -46,14 +46,14 @@ The `Release` GitHub Actions workflow runs only when a `v1.0.0`-style tag is
 pushed. It creates a draft release titled `1.0.0`, generates GitHub release
 notes, writes the tag version to both version fields in the checked-out
 `Info.plist`, builds the ZIP on a macOS runner, uploads the ZIP and
-`sha256sums.txt`, then publishes the release. The committed `Info.plist` is
-not changed by the workflow.
+then publishes the release. GitHub displays the uploaded ZIP's SHA-256 directly
+on the release asset. The committed `Info.plist` is not changed by the
+workflow.
 
 Uploads deliberately do not overwrite existing assets, and pushing the same
-tag again cannot create a second release with the same tag. The SHA-256 digest
-is printed in the workflow summary and included in `sha256sums.txt`.
+tag again cannot create a second release with the same tag.
 
-The package and checksum are immutable through this workflow after upload.
+The package is immutable through this workflow after upload.
 GitHub repository administrators can still edit or delete releases unless the
 repository's GitHub release protection or immutable-release setting is enabled.
 
@@ -61,6 +61,16 @@ An ad-hoc rebuild can change the identity macOS associates with Bluetooth or
 Keychain access. A permission prompt after rebuilding is expected. This project
 intentionally distributes ad-hoc-signed releases and does not use Developer ID
 signing or notarization.
+
+Because ad-hoc releases are not notarized, macOS may block an app downloaded
+from GitHub on another Mac. The first launch must be approved by Control-clicking
+the extracted app, choosing **Open**, and confirming **Open**. Do not disable
+Gatekeeper globally. A targeted alternative is:
+
+```sh
+xattr -dr com.apple.quarantine "/path/to/AwoX Mesh Controller.app"
+open "/path/to/AwoX Mesh Controller.app"
+```
 
 ## Project Layout
 
@@ -119,7 +129,7 @@ to them. The app exposes log level and retention controls in Settings.
 4. Test BLE control and the Home Assistant MQTT round trip with real hardware.
 5. Build from a clean checkout.
 6. Push a tag such as `v1.0.0`. The `Release` workflow creates the versioned
-  release, generates notes, and attaches the ZIP and its SHA-256 checksum
-  automatically.
+  release, generates notes, and attaches the ZIP automatically. GitHub displays
+  the asset's SHA-256 on the release page.
 7. Run `./package-release.sh` locally when inspecting the archive contents.
 8. Record user-visible changes in the GitHub release notes.
