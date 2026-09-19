@@ -56,9 +56,14 @@ reported by the light, or broadcast `0xffff` before a status is known.
 | Status request | `0xda` | `0x10` |
 
 After a control write succeeds, the app waits briefly and performs a status
-request. The status characteristic first receives `0x01`; the encrypted status
-request is then written to the command characteristic. A four-second timeout
-fails the active operation.
+request. During continuous brightness or color changes, additional commands
+reuse the authenticated connection and replace older values before that status
+request. After the reported status is received, the authenticated connection
+remains open for subsequent commands, including when the light is off. The
+status characteristic first receives `0x01`; the encrypted status request is
+then written to the command characteristic. A four-second timeout fails the
+active operation. Switching to another light or recovering from a connection
+failure creates a new authenticated session.
 
 ## Status
 

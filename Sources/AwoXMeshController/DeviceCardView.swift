@@ -14,8 +14,6 @@ final class DeviceCardView: NSView {
     private let brightnessSlider = NSSlider(value: 100, minValue: 1, maxValue: 100, target: nil, action: nil)
     private let brightnessLabel = NSTextField(labelWithString: "100%")
     private let colorWell = NSColorWell()
-    private var brightnessWorkItem: DispatchWorkItem?
-    private var colorWorkItem: DispatchWorkItem?
 
     init(profile: DeviceProfile) {
         profileID = profile.id
@@ -61,6 +59,7 @@ final class DeviceCardView: NSView {
 
         colorWell.target = self
         colorWell.action = #selector(colorChanged)
+        colorWell.isContinuous = true
         colorWell.translatesAutoresizingMaskIntoConstraints = false
         colorWell.heightAnchor.constraint(equalToConstant: 30).isActive = true
         let colorLabel = NSTextField(labelWithString: "Color")
@@ -159,24 +158,12 @@ final class DeviceCardView: NSView {
 
     @objc private func brightnessChanged() {
         brightnessLabel.stringValue = "\(brightnessSlider.integerValue)%"
-        brightnessWorkItem?.cancel()
-        let value = UInt8(brightnessSlider.integerValue)
-        let item = DispatchWorkItem { [weak self] in
-            self?.showPending("Setting brightness...")
-            self?.onBrightnessChange?(value)
-        }
-        brightnessWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: item)
+        showPending("Setting brightness...")
+        onBrightnessChange?(UInt8(brightnessSlider.integerValue))
     }
 
     @objc private func colorChanged() {
-        colorWorkItem?.cancel()
-        let color = colorWell.color
-        let item = DispatchWorkItem { [weak self] in
-            self?.showPending("Setting color...")
-            self?.onColorChange?(color)
-        }
-        colorWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: item)
+        showPending("Setting color...")
+        onColorChange?(colorWell.color)
     }
 }

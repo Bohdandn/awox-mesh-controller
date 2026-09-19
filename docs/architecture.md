@@ -27,9 +27,13 @@ flowchart LR
 item, owns saved in-memory profiles and statuses, serializes BLE operations,
 and translates MQTT commands into the same operations used by the UI.
 
-Only one `PendingOperation` may be active. A control operation authenticates,
-writes one command, requests status, applies the reported status, publishes it
-to MQTT, disconnects, and advances the queue. New operations for the same light
+Only one `PendingOperation` may be active. The coordinator keeps one
+authenticated BLE session open for the current light. A control operation
+writes its command, requests status, applies the reported status, publishes it
+to MQTT, and leaves the session ready for the next command. Brightness and color
+changes replace older in-flight updates and request one final status after the
+interaction settles. The session is disconnected only when switching to another
+light or recovering from a connection failure. New operations for the same light
 replace older queued operations to avoid stale slider or color commands.
 
 ### Bluetooth And Protocol

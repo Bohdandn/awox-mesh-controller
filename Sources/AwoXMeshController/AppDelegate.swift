@@ -87,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
     private var operations: [PendingOperation] = []
     private var activeOperation: PendingOperation?
     private var activePeripheral: CBPeripheral?
+    private var connectedProfile: DeviceProfile?
     private var pairCharacteristic: CBCharacteristic?
     private var statusCharacteristic: CBCharacteristic?
     private var commandCharacteristic: CBCharacteristic?
@@ -95,7 +96,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
     private var sessionKey: Data?
     private var pendingStatusRequest: Data?
     private var pendingControlDescription: String?
+    private var pendingControlAction: LightAction?
+    private var statusRequestWorkItem: DispatchWorkItem?
+    private var statusRequestGeneration = 0
     private var awaitingStatus = false
+    private var disconnectRequested = false
     private var operationID = 0
     private var refreshTimer: Timer?
     private var scanNeeded = false
@@ -1217,8 +1222,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
         processNextOperation()
     }
 
+    private func isContinuousControl(_ action: LightAction) -> Bool {
+        switch action {
+        case .brightness(_, _), .color(_, _, _):
+            return true
+        case .refresh, .power(_):
+            return false
+        }
+    }
+
+    private func cancelStatusRequest() {
+        statusRequestWorkItem?.cancel()
+        statusRequestWorkItem = nil
+        statusRequestGeneration += 1
+    }
+
+    private func resetOperationState() {
+        pendingStatusRequest = nil
+        pendingControlDescription = nil
+        pendingControlAction = nil
+        cancelStatusRequest()
+        awaitingStatus = false
+    }
+
+    private func canReuseConnection(for profile: DeviceProfile) -> Bool {
+        guard connectedProfile?.id == profile.id,
+              let peripheral = activePeripheral,
+              peripheral.state == .connected,
+              sessionKey != nil,
+              pairCharacteristic != nil,
+              statusCharacteristic != nil,
+              commandCharacteristic != nil
+        else { return false }
+        return true
+    }
+
     private func enqueue(profileID: UUID, action: LightAction) {
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
+
+        if isContinuousControl(action), let active = activeOperation, active.profile.id == profileID {
+            let replacement = PendingOperation(profile: profile, action: action, savesProfile: active.savesProfile)
+            if sessionKey == nil || activePeripheral == nil {
+                activeOperation = replacement
+                return
+            }
+            if pendingControlDescription != nil || awaitingStatus {
+                pendingControlAction = action
+                return
+            }
+            cancelStatusRequest()
+            activeOperation = replacement
+            performActiveAction()
+            return
+        }
+
         operations.removeAll { $0.profile.id == profileID }
         operations.append(PendingOperation(profile: profile, action: action, savesProfile: false))
         processNextOperation()
@@ -1226,13 +1283,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
 
     private func processNextOperation() {
         guard activeOperation == nil, !operations.isEmpty else { return }
-        activeOperation = operations.removeFirst()
-        operationID += 1
-        resetConnectionState()
-        cards[activeOperation!.profile.id]?.showConnecting()
-        AppLogger.shared.write("Connecting to \(activeOperation!.profile.name)")
 
-        let id = activeOperation!.profile.id
+        let operation = operations[0]
+        if canReuseConnection(for: operation.profile) {
+            operations.removeFirst()
+            beginOperation(operation, reusingConnection: true)
+            return
+        }
+
+        if let peripheral = activePeripheral, peripheral.state != .disconnected {
+            guard !disconnectRequested else { return }
+            disconnectRequested = true
+            if peripheral.state != .disconnecting {
+                centralManager.cancelPeripheralConnection(peripheral)
+            }
+            return
+        }
+
+        if activePeripheral != nil || connectedProfile != nil || sessionKey != nil {
+            resetConnectionState()
+        }
+        operations.removeFirst()
+        beginOperation(operation, reusingConnection: false)
+    }
+
+    private func beginOperation(_ operation: PendingOperation, reusingConnection: Bool) {
+        activeOperation = operation
+        operationID += 1
+        resetOperationState()
+        if reusingConnection {
+            let message = isContinuousControl(operation.action) ? "Sending..." : "Refreshing..."
+            cards[operation.profile.id]?.showPending(message)
+            performActiveAction()
+            return
+        }
+        if isContinuousControl(operation.action) {
+            cards[operation.profile.id]?.showPending("Connecting...")
+        } else {
+            cards[operation.profile.id]?.showConnecting()
+        }
+        AppLogger.shared.write("Connecting to \(operation.profile.name)")
+
+        let id = operation.profile.id
         if let peripheral = retainedPeripherals[id] ?? centralManager.retrievePeripherals(withIdentifiers: [id]).first {
             retainedPeripherals[id] = peripheral
             activePeripheral = peripheral
@@ -1391,11 +1483,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        guard activeOperation?.profile.id == peripheral.identifier else {
+        guard let operation = activeOperation, operation.profile.id == peripheral.identifier else {
             central.cancelPeripheralConnection(peripheral)
             return
         }
-        AppLogger.shared.write("Connected to \(activeOperation!.profile.name)")
+        connectedProfile = operation.profile
+        disconnectRequested = false
+        AppLogger.shared.write("Connected to \(operation.profile.name)")
         peripheral.delegate = self
         peripheral.discoverServices(nil)
     }
@@ -1406,7 +1500,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard activePeripheral?.identifier == peripheral.identifier else { return }
-        if activeOperation != nil { failActive("Disconnected") }
+        let wasRequested = disconnectRequested
+        let disconnectedProfile = connectedProfile ?? activeOperation?.profile
+        resetConnectionState()
+        if !wasRequested, activeOperation != nil {
+            failActive("Disconnected")
+            return
+        }
+        if !wasRequested,
+           let disconnectedProfile,
+           profiles.contains(where: { $0.id == disconnectedProfile.id }),
+           !operations.contains(where: { $0.profile.id == disconnectedProfile.id }) {
+            operations.insert(PendingOperation(profile: disconnectedProfile, action: .refresh, savesProfile: false), at: 0)
+        }
+        processNextOperation()
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
@@ -1475,7 +1582,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
             peripheral.writeValue(request, for: commandCharacteristic, type: .withResponse)
         } else if characteristic.uuid == commandCharacteristic?.uuid, pendingControlDescription != nil {
             pendingControlDescription = nil
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.requestStatus() }
+            if let nextAction = pendingControlAction {
+                pendingControlAction = nil
+                guard let operation = activeOperation else { return }
+                activeOperation = PendingOperation(profile: operation.profile, action: nextAction, savesProfile: operation.savesProfile)
+                performActiveAction()
+            } else {
+                scheduleStatusRequest()
+            }
         }
     }
 
@@ -1589,6 +1703,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
         }
     }
 
+    private func scheduleStatusRequest() {
+        statusRequestWorkItem?.cancel()
+        statusRequestGeneration += 1
+        let generation = statusRequestGeneration
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.statusRequestGeneration == generation else { return }
+            self.statusRequestWorkItem = nil
+            self.requestStatus()
+        }
+        statusRequestWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: item)
+    }
+
     private func handleStatusPacket(_ packet: Data?) {
         guard let operation = activeOperation, let key = sessionKey, let packet,
               let plaintext = AwoXCrypto.decryptPacket(sessionKey: key, address: operation.profile.protocolAddress, packet: packet),
@@ -1596,19 +1723,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
         else { return }
         awaitingStatus = false
         statuses[operation.profile.id] = status
-        cards[operation.profile.id]?.apply(status)
         rebuildStatusMenu()
         publishLightState(operation.profile, status: status)
         AppLogger.shared.write("\(operation.profile.name): \(status.summary)")
-        finishActive()
+        if let nextAction = pendingControlAction {
+            pendingControlAction = nil
+            activeOperation = PendingOperation(profile: operation.profile, action: nextAction, savesProfile: operation.savesProfile)
+            performActiveAction()
+        } else {
+            cards[operation.profile.id]?.apply(status)
+            finishActive()
+        }
     }
 
-    private func finishActive() {
-        let peripheral = activePeripheral
+    private func disconnectCurrentConnection() {
+        guard let peripheral = activePeripheral else {
+            resetConnectionState()
+            processNextOperation()
+            return
+        }
+        guard peripheral.state != .disconnected else {
+            resetConnectionState()
+            processNextOperation()
+            return
+        }
+        disconnectRequested = true
+        if peripheral.state != .disconnecting {
+            centralManager.cancelPeripheralConnection(peripheral)
+        }
+    }
+
+    private func finishActive(preserveConnection: Bool = true) {
         activeOperation = nil
-        resetConnectionState()
-        if let peripheral { centralManager.cancelPeripheralConnection(peripheral) }
-        processNextOperation()
+        resetOperationState()
+        if preserveConnection, activePeripheral?.state == .connected, sessionKey != nil {
+            processNextOperation()
+        } else {
+            disconnectCurrentConnection()
+        }
     }
 
     private func failActive(_ message: String) {
@@ -1623,20 +1775,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
             addStatusLabel?.textColor = .systemRed
             addSaveButton?.isEnabled = true
         }
-        finishActive()
+        finishActive(preserveConnection: false)
     }
 
     private func resetConnectionState() {
+        resetOperationState()
         activePeripheral = nil
+        connectedProfile = nil
         pairCharacteristic = nil
         statusCharacteristic = nil
         commandCharacteristic = nil
         pendingServices = 0
         sessionRandom = nil
         sessionKey = nil
-        pendingStatusRequest = nil
-        pendingControlDescription = nil
-        awaitingStatus = false
+        disconnectRequested = false
     }
 
     private func confirmDelete(_ profile: DeviceProfile) {
