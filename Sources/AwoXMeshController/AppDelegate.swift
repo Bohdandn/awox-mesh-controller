@@ -602,7 +602,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
         if requestedState == "OFF" || command.brightness == 0 {
             actions.append(.power(false))
         } else {
-            if requestedState == "ON" || command.color != nil || command.brightness != nil {
+            let needsPowerOn = statuses[id]?.isOn != true
+            if needsPowerOn && (requestedState == "ON" || command.color != nil || command.brightness != nil) {
                 actions.append(.power(true))
             }
             if let color = command.color {
@@ -1713,11 +1714,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, CBCentralManagerDelega
             self.requestStatus()
         }
         statusRequestWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: item)
+        let delay: TimeInterval
+        if let action = activeOperation?.action, case .power(true) = action {
+            delay = 1.0
+        } else {
+            delay = 0.3
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    private func shouldHandleStatusPacket(for operation: PendingOperation) -> Bool {
+        guard !awaitingStatus else { return true }
+        if case .power(true) = operation.action {
+            return false
+        }
+        return true
     }
 
     private func handleStatusPacket(_ packet: Data?) {
-        guard let operation = activeOperation, let key = sessionKey, let packet,
+        guard let operation = activeOperation,
+              shouldHandleStatusPacket(for: operation),
+              let key = sessionKey, let packet,
               let plaintext = AwoXCrypto.decryptPacket(sessionKey: key, address: operation.profile.protocolAddress, packet: packet),
               let status = AwoXCrypto.parseLightStatus(plaintext)
         else { return }
